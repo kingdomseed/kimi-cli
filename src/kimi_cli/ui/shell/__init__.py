@@ -23,6 +23,7 @@ from kimi_cli.ui.shell.slash import registry as shell_slash_registry
 from kimi_cli.ui.shell.slash import shell_mode_registry
 from kimi_cli.ui.shell.update import LATEST_VERSION_FILE, UpdateResult, do_update, semver_tuple
 from kimi_cli.ui.shell.visualize import visualize
+from kimi_cli.utils.errors import format_chat_provider_error, llm_log_path, safe_base_url_host
 from kimi_cli.utils.envvar import get_env_bool
 from kimi_cli.utils.logging import open_original_stderr
 from kimi_cli.utils.signals import install_sigint_handler
@@ -250,7 +251,17 @@ class Shell:
             logger.exception("LLM not supported:")
             console.print(f"[red]{e}[/red]")
         except ChatProviderError as e:
-            logger.exception("LLM provider error:")
+            extra: dict[str, object] = {"error_type": e.__class__.__name__}
+            if isinstance(self.soul, KimiSoul) and self.soul.llm is not None:
+                model_name = self.soul.llm.model_name
+                extra["model"] = model_name
+                base_url = getattr(self.soul.llm.chat_provider, "model_parameters", {}).get(
+                    "base_url"
+                )
+                if isinstance(base_url, str):
+                    if host := safe_base_url_host(base_url):
+                        extra["base_url_host"] = host
+            logger.bind(**extra).exception("LLM provider error:")
             if isinstance(e, APIStatusError) and e.status_code == 401:
                 console.print("[red]Authorization failed, please check your login status[/red]")
             elif isinstance(e, APIStatusError) and e.status_code == 402:
@@ -258,7 +269,10 @@ class Shell:
             elif isinstance(e, APIStatusError) and e.status_code == 403:
                 console.print("[red]Quota exceeded, please upgrade your plan or retry later[/red]")
             else:
-                console.print(f"[red]LLM provider error: {e}[/red]")
+                console.print(f"[red]LLM provider error: {format_chat_provider_error(e)}[/red]")
+                console.print(
+                    f"[grey50]Logs: {llm_log_path()} (run with --debug for more)[/grey50]"
+                )
         except MaxStepsReached as e:
             logger.warning("Max steps reached: {n_steps}", n_steps=e.n_steps)
             console.print(f"[yellow]{e}[/yellow]")

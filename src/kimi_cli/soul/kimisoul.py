@@ -57,6 +57,7 @@ from kimi_cli.wire.types import (
 )
 
 if TYPE_CHECKING:
+    from kimi_cli.llm import LLM
 
     def type_check(soul: KimiSoul):
         _: Soul = soul
@@ -127,6 +128,10 @@ class KimiSoul:
     @property
     def model_name(self) -> str:
         return self._runtime.llm.chat_provider.model_name if self._runtime.llm else ""
+
+    @property
+    def llm(self) -> LLM | None:
+        return self._runtime.llm
 
     @property
     def model_capabilities(self) -> set[ModelCapability] | None:

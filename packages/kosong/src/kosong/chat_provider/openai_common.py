@@ -19,9 +19,11 @@ def convert_error(error: OpenAIError | httpx.HTTPError) -> ChatProviderError:
         case openai.APIStatusError():
             return APIStatusError(error.status_code, error.message)
         case openai.APIConnectionError():
-            return APIConnectionError(error.message)
+            message = error.message or str(error) or "Connection error."
+            return APIConnectionError(message)
         case openai.APITimeoutError():
-            return APITimeoutError(error.message)
+            message = error.message or str(error) or "Request timed out."
+            return APITimeoutError(message)
         case httpx.TimeoutException():
             return APITimeoutError(str(error))
         case httpx.NetworkError():

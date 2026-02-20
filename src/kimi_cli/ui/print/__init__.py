@@ -21,6 +21,7 @@ from kimi_cli.soul import (
 )
 from kimi_cli.soul.kimisoul import KimiSoul
 from kimi_cli.ui.print.visualize import visualize
+from kimi_cli.utils.errors import format_chat_provider_error, llm_log_path
 from kimi_cli.utils.logging import logger
 from kimi_cli.utils.signals import install_sigint_handler
 
@@ -100,7 +101,8 @@ class Print:
             print(str(e))
         except ChatProviderError as e:
             logger.exception("LLM provider error:")
-            print(str(e))
+            print(f"LLM provider error: {format_chat_provider_error(e)}")
+            print(f"Logs: {llm_log_path()} (run with --debug for more)")
         except MaxStepsReached as e:
             logger.warning("Max steps reached: {n_steps}", n_steps=e.n_steps)
             print(str(e))
