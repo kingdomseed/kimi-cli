@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from inline_snapshot import snapshot
 from kosong.chat_provider.echo import EchoChatProvider
 from kosong.chat_provider.kimi import Kimi
@@ -117,3 +118,34 @@ def test_create_llm_openai_legacy_azure_adds_api_key_header_and_api_version(monk
 
     assert llm.chat_provider.client.default_query == snapshot({"api-version": "2024-05-01-preview"})
     assert llm.chat_provider.client.default_headers.get("api-key") == snapshot("test-key")
+
+
+def test_create_llm_openai_legacy_passes_reasoning_key():
+    provider = LLMProvider(
+        type="openai_legacy",
+        base_url="https://example.cognitiveservices.azure.com/openai/deployments/test-deployment",
+        api_key=SecretStr("test-key"),
+        reasoning_key="reasoning_content",
+    )
+    model = LLMModel(
+        provider="azure-openai",
+        model="test-deployment",
+        max_context_size=4096,
+        capabilities=None,
+    )
+
+    llm = create_llm(provider, model)
+    assert llm is not None
+    assert isinstance(llm.chat_provider, OpenAILegacy)
+    assert llm.chat_provider._reasoning_key == snapshot("reasoning_content")
+
+
+@pytest.mark.parametrize("value", ["", "  ", "\t\n"])
+def test_reasoning_key_blank_normalized_to_none(value):
+    provider = LLMProvider(
+        type="openai_legacy",
+        base_url="https://example.cognitiveservices.azure.com/openai/deployments/test-deployment",
+        api_key=SecretStr("test-key"),
+        reasoning_key=value,
+    )
+    assert provider.reasoning_key is None

@@ -200,6 +200,7 @@ def create_llm(
                 model=model.model,
                 base_url=provider.base_url,
                 api_key=resolved_api_key,
+                reasoning_key=provider.reasoning_key,
                 **_openai_client_kwargs(provider, resolved_api_key=resolved_api_key),
             )
         case "openai_responses":

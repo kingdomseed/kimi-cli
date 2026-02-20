@@ -12,6 +12,7 @@ from pydantic import (
     SecretStr,
     ValidationError,
     field_serializer,
+    field_validator,
     model_validator,
 )
 from tomlkit.exceptions import TOMLKitError
@@ -46,8 +47,18 @@ class LLMProvider(BaseModel):
     """Custom headers to include in API requests"""
     default_query: dict[str, object] | None = None
     """Default query parameters to include in API requests"""
+    reasoning_key: str | None = None
+    """Field name for reasoning content in API messages (for openai_legacy provider)."""
     oauth: OAuthRef | None = None
     """OAuth credential reference (do not store tokens here)."""
+
+    @field_validator("reasoning_key", mode="before")
+    @classmethod
+    def normalize_reasoning_key(cls, v: str | None) -> str | None:
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
 
     @field_serializer("api_key", when_used="json")
     def dump_secret(self, v: SecretStr):
