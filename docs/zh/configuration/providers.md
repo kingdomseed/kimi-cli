@@ -96,6 +96,10 @@ type = "azure_openai_legacy_router"
 base_url = "https://<primary-resource>.cognitiveservices.azure.com/openai/deployments/Kimi-K2.5"
 api_key = "" # 建议通过环境变量 AZURE_OPENAI_API_KEY 设置，避免写入磁盘
 reasoning_key = "reasoning_content"
+first_token_warn_seconds = 20
+# 可选：如果希望模型迟迟不开始 stream 时自动切换 endpoint，可设置该值。
+# 若不设置，则只会提示 warning，但仍继续等待。
+first_token_timeout_seconds = 120
 default_query = { "api-version" = "2024-05-01-preview" }
 
 fallbacks = [

@@ -97,6 +97,10 @@ type = "azure_openai_legacy_router"
 base_url = "https://<primary-resource>.cognitiveservices.azure.com/openai/deployments/Kimi-K2.5"
 api_key = "" # recommended: set via env var AZURE_OPENAI_API_KEY
 reasoning_key = "reasoning_content"
+first_token_warn_seconds = 20
+# Optional: set this if you want automatic failover when the model doesn't start streaming.
+# If omitted, Kimi CLI will only warn but will continue waiting.
+first_token_timeout_seconds = 120
 default_query = { "api-version" = "2024-05-01-preview" }
 
 fallbacks = [
