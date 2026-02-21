@@ -14,6 +14,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from kimi_cli.exception import ConfigError
+from kimi_cli.share import get_share_dir
 from kimi_cli.soul import LLMNotSet, LLMNotSupported, MaxStepsReached, RunCancelled, Soul, run_soul
 from kimi_cli.soul.kimisoul import KimiSoul
 from kimi_cli.ui.shell.console import console
@@ -30,6 +32,19 @@ from kimi_cli.utils.slashcmd import SlashCommand, SlashCommandCall, parse_slash_
 from kimi_cli.utils.subprocess_env import get_clean_env
 from kimi_cli.utils.term import ensure_new_line, ensure_tty_sane
 from kimi_cli.wire.types import ContentPart, StatusUpdate
+
+
+def _format_exception(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if not message and getattr(exc, "__cause__", None) is not None:
+        message = str(exc.__cause__).strip()
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
+
+
+def _log_path() -> str:
+    return str(get_share_dir() / "logs" / "kimi.log")
 
 
 class Shell:
@@ -249,6 +264,10 @@ class Shell:
             # actually unsupported input/mode should already be blocked by prompt session
             logger.exception("LLM not supported:")
             console.print(f"[red]{e}[/red]")
+        except ConfigError as e:
+            logger.exception("Configuration error:")
+            console.print(f"[red]{e}[/red]")
+            console.print(f"[dim]See logs: {_log_path()}[/dim]")
         except ChatProviderError as e:
             logger.exception("LLM provider error:")
             if isinstance(e, APIStatusError) and e.status_code == 401:
@@ -258,7 +277,8 @@ class Shell:
             elif isinstance(e, APIStatusError) and e.status_code == 403:
                 console.print("[red]Quota exceeded, please upgrade your plan or retry later[/red]")
             else:
-                console.print(f"[red]LLM provider error: {e}[/red]")
+                console.print(f"[red]LLM provider error: {_format_exception(e)}[/red]")
+                console.print(f"[dim]See logs: {_log_path()}[/dim]")
         except MaxStepsReached as e:
             logger.warning("Max steps reached: {n_steps}", n_steps=e.n_steps)
             console.print(f"[yellow]{e}[/yellow]")
@@ -267,7 +287,8 @@ class Shell:
             console.print("[red]Interrupted by user[/red]")
         except Exception as e:
             logger.exception("Unexpected error:")
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {_format_exception(e)}[/red]")
+            console.print(f"[dim]See logs: {_log_path()}[/dim]")
             raise  # re-raise unknown error
         finally:
             remove_sigint()

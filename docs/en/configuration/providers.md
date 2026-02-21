@@ -108,6 +108,10 @@ fallbacks = [
 ]
 ```
 
+Notes:
+
+- If a fallback entry uses `api_key_env` but that environment variable is missing, Kimi CLI will skip that fallback endpoint (and continue with the remaining endpoints).
+
 ### `openai_responses`
 
 For OpenAI Responses API (newer API format).

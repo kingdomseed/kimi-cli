@@ -107,6 +107,10 @@ fallbacks = [
 ]
 ```
 
+说明：
+
+- 如果某个 fallback 使用了 `api_key_env`，但对应环境变量未设置，Kimi CLI 会跳过该 fallback endpoint（继续使用其余可用 endpoint）。
+
 ### `openai_responses`
 
 用于 OpenAI Responses API（较新的 API 格式）。

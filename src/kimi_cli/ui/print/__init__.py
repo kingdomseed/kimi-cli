@@ -11,6 +11,8 @@ from kosong.message import Message
 from rich import print
 
 from kimi_cli.cli import InputFormat, OutputFormat
+from kimi_cli.exception import ConfigError
+from kimi_cli.share import get_share_dir
 from kimi_cli.soul import (
     LLMNotSet,
     LLMNotSupported,
@@ -23,6 +25,19 @@ from kimi_cli.soul.kimisoul import KimiSoul
 from kimi_cli.ui.print.visualize import visualize
 from kimi_cli.utils.logging import logger
 from kimi_cli.utils.signals import install_sigint_handler
+
+
+def _format_exception(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if not message and getattr(exc, "__cause__", None) is not None:
+        message = str(exc.__cause__).strip()
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
+
+
+def _log_path() -> Path:
+    return get_share_dir() / "logs" / "kimi.log"
 
 
 class Print:
@@ -98,9 +113,12 @@ class Print:
         except LLMNotSupported as e:
             logger.exception("LLM not supported:")
             print(str(e))
+        except ConfigError as e:
+            logger.exception("Configuration error:")
+            print(f"{e}\nSee logs: {_log_path()}")
         except ChatProviderError as e:
             logger.exception("LLM provider error:")
-            print(str(e))
+            print(f"LLM provider error: {_format_exception(e)}\nSee logs: {_log_path()}")
         except MaxStepsReached as e:
             logger.warning("Max steps reached: {n_steps}", n_steps=e.n_steps)
             print(str(e))
@@ -109,7 +127,7 @@ class Print:
             print("Interrupted by user")
         except BaseException as e:
             logger.exception("Unknown error:")
-            print(f"Unknown error: {e}")
+            print(f"Unknown error: {_format_exception(e)}\nSee logs: {_log_path()}")
             raise
         finally:
             remove_sigint()

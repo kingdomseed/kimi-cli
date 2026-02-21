@@ -119,7 +119,9 @@ def test_augment_provider_with_env_vars_openai_legacy_tracks_applied(monkeypatch
             api_key=SecretStr("env-key"),
         )
     )
-    assert applied == snapshot({"OPENAI_BASE_URL": "https://env.test/v1", "AZURE_OPENAI_API_KEY": "******"})
+    assert applied == snapshot(
+        {"OPENAI_BASE_URL": "https://env.test/v1", "AZURE_OPENAI_API_KEY": "******"}
+    )
 
 
 def test_augment_provider_with_env_vars_azure_openai_legacy_router_tracks_applied(monkeypatch):
@@ -240,7 +242,7 @@ def test_reasoning_key_blank_normalized_to_none(value):
     assert provider.reasoning_key is None
 
 
-def test_create_llm_azure_openai_legacy_router_requires_fallback_env(monkeypatch):
+def test_create_llm_azure_openai_legacy_router_skips_missing_fallback_env(monkeypatch):
     provider = LLMProvider(
         type="azure_openai_legacy_router",
         base_url="https://example.cognitiveservices.azure.com/openai/deployments/test-deployment",
@@ -257,8 +259,12 @@ def test_create_llm_azure_openai_legacy_router_requires_fallback_env(monkeypatch
 
     monkeypatch.delenv("MISSING_ENV", raising=False)
 
-    with pytest.raises(ConfigError, match=r"Missing environment variable"):
-        create_llm(provider, model)
+    llm = create_llm(provider, model)
+    assert llm is not None
+    assert isinstance(llm.chat_provider, FailoverChatProvider)
+    assert llm.chat_provider.model_name == snapshot("test-deployment")
+    # Missing env var should not block using the primary endpoint.
+    assert len(llm.chat_provider._providers) == 1
 
 
 def test_create_llm_azure_openai_legacy_router_creates_failover(monkeypatch):

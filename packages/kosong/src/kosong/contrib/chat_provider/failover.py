@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import copy
 import asyncio
+import copy
 from collections.abc import AsyncIterator, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Self
 
@@ -19,9 +20,8 @@ from kosong.chat_provider import (
     ThinkingEffort,
     TokenUsage,
 )
-from kosong.tooling import Tool
 from kosong.message import Message
-
+from kosong.tooling import Tool
 
 _DEFAULT_FAILOVER_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
@@ -48,7 +48,7 @@ def _should_failover(err: BaseException) -> bool:
     if isinstance(err, (asyncio.CancelledError, KeyboardInterrupt)):
         return False
 
-    if isinstance(err, asyncio.TimeoutError):
+    if isinstance(err, TimeoutError):
         return True
     if isinstance(err, (APITimeoutError, APIConnectionError, APIEmptyResponseError)):
         return True
@@ -140,7 +140,11 @@ class FailoverChatProvider:
                     total=total,
                     provider=provider_label,
                 )
-                stream = await provider.generate(system_prompt=system_prompt, tools=tools, history=history)
+                stream = await provider.generate(
+                    system_prompt=system_prompt,
+                    tools=tools,
+                    history=history,
+                )
                 it = stream.__aiter__()
                 first = await self._wait_for_first_part(it, provider_label)
                 self._active_index = idx
@@ -161,7 +165,8 @@ class FailoverChatProvider:
                     raise
                 status_code = err.status_code if isinstance(err, APIStatusError) else None
                 logger.warning(
-                    "Failover: retriable error from {provider}: {err_type}{status}. Trying next provider.",
+                    "Failover: retriable error from {provider}: {err_type}{status}. "
+                    "Trying next provider.",
                     provider=provider_label,
                     err_type=type(err).__name__,
                     status=f" (status={status_code})" if status_code is not None else "",
@@ -219,11 +224,9 @@ class FailoverChatProvider:
             if timeout_s is not None and elapsed >= timeout_s:
                 if not first_task.done():
                     first_task.cancel()
-                    try:
+                    with suppress(BaseException):
                         await first_task
-                    except BaseException:
-                        pass
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
 
             if warn_s is None:
                 assert timeout_s is not None
@@ -236,7 +239,7 @@ class FailoverChatProvider:
             try:
                 done, _ = await asyncio.wait({first_task}, timeout=step_timeout)
                 if not done:
-                    raise asyncio.TimeoutError()
+                    raise TimeoutError()
 
                 try:
                     return first_task.result()
@@ -244,10 +247,11 @@ class FailoverChatProvider:
                     raise APIEmptyResponseError(
                         f"Stream ended before first token from {provider_label}"
                     ) from e
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 warned += 1
                 logger.warning(
-                    "Failover: waiting {elapsed:.1f}s for first token from {provider} (warn #{warned})",
+                    "Failover: waiting {elapsed:.1f}s for first token from {provider} "
+                    "(warn #{warned})",
                     elapsed=loop.time() - start,
                     provider=provider_label,
                     warned=warned,

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 from urllib.parse import urlparse
 
 from kosong.chat_provider import ChatProvider
+from loguru import logger
 from pydantic import SecretStr
 
 from kimi_cli.constant import USER_AGENT
@@ -173,9 +174,8 @@ def _openai_client_kwargs(
     base_url = base_url or provider.base_url
     if base_url and _is_azure_openai_base_url(base_url):
         if "api-version" not in default_query:
-            api_version = (
-                os.getenv("AZURE_COGNITIVE_SERVICES_API_VERSION")
-                or os.getenv("AZURE_OPENAI_API_VERSION")
+            api_version = os.getenv("AZURE_COGNITIVE_SERVICES_API_VERSION") or os.getenv(
+                "AZURE_OPENAI_API_VERSION"
             )
             if api_version:
                 default_query["api-version"] = api_version
@@ -264,9 +264,13 @@ def create_llm(
                 if fb.api_key_env:
                     fb_key = os.getenv(fb.api_key_env)
                     if not fb_key:
-                        raise ConfigError(
-                            f"Missing environment variable for fallback api_key: {fb.api_key_env}"
+                        logger.warning(
+                            "Azure router: skipping fallback endpoint {base_url} because env var "
+                            "{env} is missing",
+                            base_url=fb_base_url,
+                            env=fb.api_key_env,
                         )
+                        continue
                 elif fb.api_key is not None:
                     fb_key = fb.api_key.get_secret_value()
                 else:
