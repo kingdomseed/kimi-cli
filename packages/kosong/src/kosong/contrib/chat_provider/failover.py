@@ -204,41 +204,51 @@ class FailoverChatProvider:
                     f"Stream ended before first token from {provider_label}"
                 ) from e
 
-        # If we have an overall timeout but no warn interval, use the overall timeout directly.
-        if warn_s is None and timeout_s is not None:
-            try:
-                return await asyncio.wait_for(it.__anext__(), timeout=timeout_s)
-            except StopAsyncIteration as e:
-                raise APIEmptyResponseError(
-                    f"Stream ended before first token from {provider_label}"
-                ) from e
-
-        assert warn_s is not None
-
-        start = asyncio.get_running_loop().time()
+        loop = asyncio.get_running_loop()
+        start = loop.time()
         warned = 0
 
+        # Create a single task and wait on it without cancelling it for warnings.
+        # This avoids turning a slow first token into a spurious StopAsyncIteration by
+        # repeatedly cancelling `__anext__()` via `asyncio.wait_for`.
+        first_task = asyncio.create_task(it.__anext__())
+
         while True:
-            elapsed = asyncio.get_running_loop().time() - start
-            remaining: float | None = None
-            if timeout_s is not None:
-                remaining = max(0.0, timeout_s - elapsed)
-                if remaining == 0.0:
+            elapsed = loop.time() - start
+
+            if timeout_s is not None and elapsed >= timeout_s:
+                if not first_task.done():
+                    first_task.cancel()
+                    try:
+                        await first_task
+                    except BaseException:
+                        pass
+                raise asyncio.TimeoutError()
+
+            if warn_s is None:
+                assert timeout_s is not None
+                step_timeout = max(0.0, timeout_s - elapsed)
+            else:
+                step_timeout = warn_s
+                if timeout_s is not None:
+                    step_timeout = min(step_timeout, max(0.0, timeout_s - elapsed))
+
+            try:
+                done, _ = await asyncio.wait({first_task}, timeout=step_timeout)
+                if not done:
                     raise asyncio.TimeoutError()
 
-            # Wait in warn-sized chunks so we can periodically log "still waiting".
-            step_timeout = warn_s if remaining is None else min(warn_s, remaining)
-            try:
-                return await asyncio.wait_for(it.__anext__(), timeout=step_timeout)
+                try:
+                    return first_task.result()
+                except StopAsyncIteration as e:
+                    raise APIEmptyResponseError(
+                        f"Stream ended before first token from {provider_label}"
+                    ) from e
             except asyncio.TimeoutError:
                 warned += 1
                 logger.warning(
                     "Failover: waiting {elapsed:.1f}s for first token from {provider} (warn #{warned})",
-                    elapsed=elapsed + step_timeout,
+                    elapsed=loop.time() - start,
                     provider=provider_label,
                     warned=warned,
                 )
-            except StopAsyncIteration as e:
-                raise APIEmptyResponseError(
-                    f"Stream ended before first token from {provider_label}"
-                ) from e
