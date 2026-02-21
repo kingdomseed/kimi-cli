@@ -35,6 +35,26 @@ class OAuthRef(BaseModel):
 class LLMProvider(BaseModel):
     """LLM provider configuration."""
 
+    class Fallback(BaseModel):
+        """Fallback endpoint for failover-capable providers."""
+
+        base_url: str
+        """API base URL for the fallback endpoint."""
+        api_key: SecretStr | None = None
+        """API key for the fallback endpoint (optional; prefer api_key_env)."""
+        api_key_env: str | None = None
+        """Environment variable name containing the API key for this fallback endpoint."""
+
+        @model_validator(mode="after")
+        def validate_api_key_source(self) -> Self:
+            if self.api_key is not None and self.api_key_env is not None:
+                raise ValueError("Provide only one of api_key or api_key_env")
+            return self
+
+        @field_serializer("api_key", when_used="json")
+        def dump_secret(self, v: SecretStr | None):
+            return v.get_secret_value() if v is not None else None
+
     type: ProviderType
     """Provider type"""
     base_url: str
@@ -47,6 +67,8 @@ class LLMProvider(BaseModel):
     """Custom headers to include in API requests"""
     default_query: dict[str, object] | None = None
     """Default query parameters to include in API requests"""
+    fallbacks: list[Fallback] | None = None
+    """Optional fallback endpoints used by failover-capable providers."""
     reasoning_key: str | None = None
     """Field name for reasoning content in API messages (for openai_legacy provider)."""
     oauth: OAuthRef | None = None

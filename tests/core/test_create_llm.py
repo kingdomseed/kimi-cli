@@ -4,6 +4,7 @@ import pytest
 from inline_snapshot import snapshot
 from kosong.chat_provider.echo import EchoChatProvider
 from kosong.chat_provider.kimi import Kimi
+from kosong.contrib.chat_provider.failover import FailoverChatProvider
 from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
 from pydantic import SecretStr
 
@@ -143,6 +144,32 @@ def test_create_llm_openai_legacy_azure_adds_api_key_header_and_api_version(monk
     assert llm.chat_provider.client.default_query == snapshot({"api-version": "2024-05-01-preview"})
     assert llm.chat_provider.client.default_headers.get("api-key") == snapshot("test-key")
 
+
+def test_create_llm_openai_legacy_strips_endpoint_suffix_and_query(monkeypatch):
+    provider = LLMProvider(
+        type="openai_legacy",
+        base_url=(
+            "https://example.cognitiveservices.azure.com/openai/deployments/test-deployment/"
+            "chat/completions?api-version=2024-05-01-preview"
+        ),
+        api_key=SecretStr("test-key"),
+        default_query={"api-version": "2024-05-01-preview"},
+    )
+    model = LLMModel(
+        provider="azure-openai",
+        model="test-deployment",
+        max_context_size=4096,
+        capabilities=None,
+    )
+
+    llm = create_llm(provider, model)
+    assert llm is not None
+    assert isinstance(llm.chat_provider, OpenAILegacy)
+    assert str(llm.chat_provider.client.base_url) == snapshot(
+        "https://example.cognitiveservices.azure.com/openai/deployments/test-deployment/"
+    )
+
+
 def test_create_llm_openai_legacy_azure_requires_api_version(monkeypatch):
     provider = LLMProvider(
         type="openai_legacy",
@@ -194,3 +221,48 @@ def test_reasoning_key_blank_normalized_to_none(value):
         reasoning_key=value,
     )
     assert provider.reasoning_key is None
+
+
+def test_create_llm_azure_openai_legacy_router_requires_fallback_env(monkeypatch):
+    provider = LLMProvider(
+        type="azure_openai_legacy_router",
+        base_url="https://example.cognitiveservices.azure.com/openai/deployments/test-deployment",
+        api_key=SecretStr("primary-key"),
+        default_query={"api-version": "2024-05-01-preview"},
+        fallbacks=[
+            LLMProvider.Fallback(
+                base_url="https://backup.cognitiveservices.azure.com/openai/deployments/test-deployment",
+                api_key_env="MISSING_ENV",
+            )
+        ],
+    )
+    model = LLMModel(provider="azure-openai", model="test-deployment", max_context_size=4096)
+
+    monkeypatch.delenv("MISSING_ENV", raising=False)
+
+    with pytest.raises(ConfigError, match=r"Missing environment variable"):
+        create_llm(provider, model)
+
+
+def test_create_llm_azure_openai_legacy_router_creates_failover(monkeypatch):
+    provider = LLMProvider(
+        type="azure_openai_legacy_router",
+        base_url="https://example.cognitiveservices.azure.com/openai/deployments/test-deployment",
+        api_key=SecretStr("primary-key"),
+        default_query={"api-version": "2024-05-01-preview"},
+        reasoning_key="reasoning_content",
+        fallbacks=[
+            LLMProvider.Fallback(
+                base_url="https://backup.cognitiveservices.azure.com/openai/deployments/test-deployment",
+                api_key_env="BACKUP_KEY",
+            )
+        ],
+    )
+    model = LLMModel(provider="azure-openai", model="test-deployment", max_context_size=4096)
+
+    monkeypatch.setenv("BACKUP_KEY", "backup-key")
+
+    llm = create_llm(provider, model)
+    assert llm is not None
+    assert isinstance(llm.chat_provider, FailoverChatProvider)
+    assert llm.chat_provider.model_name == snapshot("test-deployment")

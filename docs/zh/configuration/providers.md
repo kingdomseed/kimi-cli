@@ -31,6 +31,7 @@ Kimi Code CLI 支持多种 LLM 平台，可以通过配置文件或 `/login` 命
 | `kimi` | Kimi API |
 | `openai_legacy` | OpenAI Chat Completions API |
 | `openai_responses` | OpenAI Responses API |
+| `azure_openai_legacy_router` | Azure OpenAI Chat Completions（自动故障切换） |
 | `anthropic` | Anthropic Claude API |
 | `gemini` | Google Gemini API |
 | `vertexai` | Google Vertex AI |
@@ -83,6 +84,24 @@ export AZURE_COGNITIVE_SERVICES_API_VERSION="2024-05-01-preview"
 - `Kimi-K2-Thinking`：chat-completions（包含 `reasoning_content`），仅文本输入，支持 tool calling。
 - 文档中两者均标注为 262,144 token 输入与 262,144 token 输出：
   `https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?view=foundry-classic&pivots=azure-direct-others&tabs=global-standard-aoai%2Cglobal-standard#moonshot-ai-models-sold-directly-by-azure`
+
+#### Azure OpenAI 故障切换（多区域）
+
+如果你在多个 Azure 区域里部署了同名 deployment（例如 Sweden Central 与 East US 2 都有 `Kimi-K2.5`），
+可以使用支持故障切换的 provider：当遇到瞬时错误（超时、408/429/5xx）时自动切换到备用 endpoint。
+
+```toml
+[providers.azure-kimi]
+type = "azure_openai_legacy_router"
+base_url = "https://<primary-resource>.cognitiveservices.azure.com/openai/deployments/Kimi-K2.5"
+api_key = "" # 建议通过环境变量 AZURE_OPENAI_API_KEY 设置，避免写入磁盘
+reasoning_key = "reasoning_content"
+default_query = { "api-version" = "2024-05-01-preview" }
+
+fallbacks = [
+  { base_url = "https://<backup-resource>.cognitiveservices.azure.com/openai/deployments/Kimi-K2.5", api_key_env = "AZURE_OPENAI_EASTUS2_API_KEY" },
+]
+```
 
 ### `openai_responses`
 

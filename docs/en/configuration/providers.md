@@ -31,6 +31,7 @@ The `type` field in `providers` configuration specifies the API provider type. D
 | `kimi` | Kimi API |
 | `openai_legacy` | OpenAI Chat Completions API |
 | `openai_responses` | OpenAI Responses API |
+| `azure_openai_legacy_router` | Azure OpenAI Chat Completions with automatic failover |
 | `anthropic` | Anthropic Claude API |
 | `gemini` | Google Gemini API |
 | `vertexai` | Google Vertex AI |
@@ -83,6 +84,25 @@ Notes for Moonshot AI “sold directly by Azure” models:
 - `Kimi-K2-Thinking`: chat-completions with `reasoning_content`, text-only input, tool calling.
 - Both are documented as 262,144 token input and 262,144 token output. See Microsoft Learn for details:
   `https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?view=foundry-classic&pivots=azure-direct-others&tabs=global-standard-aoai%2Cglobal-standard#moonshot-ai-models-sold-directly-by-azure`
+
+#### Azure OpenAI failover (multi-region)
+
+If you have the same deployment name in multiple Azure regions (for example `Kimi-K2.5` in
+Sweden Central and East US 2), you can configure a failover provider that automatically retries
+on transient errors (timeouts, 408/429/5xx) by switching to the next endpoint.
+
+```toml
+[providers.azure-kimi]
+type = "azure_openai_legacy_router"
+base_url = "https://<primary-resource>.cognitiveservices.azure.com/openai/deployments/Kimi-K2.5"
+api_key = "" # recommended: set via env var AZURE_OPENAI_API_KEY
+reasoning_key = "reasoning_content"
+default_query = { "api-version" = "2024-05-01-preview" }
+
+fallbacks = [
+  { base_url = "https://<backup-resource>.cognitiveservices.azure.com/openai/deployments/Kimi-K2.5", api_key_env = "AZURE_OPENAI_EASTUS2_API_KEY" },
+]
+```
 
 ### `openai_responses`
 

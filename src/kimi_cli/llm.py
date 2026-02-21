@@ -21,6 +21,7 @@ type ProviderType = Literal[
     "kimi",
     "openai_legacy",
     "openai_responses",
+    "azure_openai_legacy_router",
     "anthropic",
     "google_genai",  # for backward-compatibility, equals to `gemini`
     "gemini",
@@ -127,7 +128,26 @@ def _is_azure_openai_base_url(base_url: str) -> bool:
     return "/openai/deployments/" in path
 
 
-def _openai_client_kwargs(provider: LLMProvider, *, resolved_api_key: str) -> dict[str, Any]:
+def _normalize_openai_base_url(base_url: str) -> str:
+    """Normalize base URLs that may include endpoint suffixes or query params."""
+    parsed = urlparse(base_url)
+    normalized = parsed._replace(query="", fragment="").geturl()
+
+    lowered = normalized.lower()
+    for suffix in ("/chat/completions", "/responses"):
+        if lowered.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+            lowered = normalized.lower()
+
+    return normalized.rstrip("/")
+
+
+def _openai_client_kwargs(
+    provider: LLMProvider,
+    *,
+    resolved_api_key: str,
+    base_url: str | None = None,
+) -> dict[str, Any]:
     """Return kwargs forwarded into `openai.AsyncOpenAI(...)` (via Kosong providers).
 
     This is used by `openai_legacy` and `openai_responses`.
@@ -146,7 +166,8 @@ def _openai_client_kwargs(provider: LLMProvider, *, resolved_api_key: str) -> di
     if provider.default_query:
         default_query.update(provider.default_query)
 
-    if provider.base_url and _is_azure_openai_base_url(provider.base_url):
+    base_url = base_url or provider.base_url
+    if base_url and _is_azure_openai_base_url(base_url):
         if "api-version" not in default_query:
             api_version = (
                 os.getenv("AZURE_COGNITIVE_SERVICES_API_VERSION")
@@ -217,19 +238,66 @@ def create_llm(
 
             chat_provider = OpenAILegacy(
                 model=model.model,
-                base_url=provider.base_url,
+                base_url=_normalize_openai_base_url(provider.base_url),
                 api_key=resolved_api_key,
                 reasoning_key=provider.reasoning_key,
-                **_openai_client_kwargs(provider, resolved_api_key=resolved_api_key),
+                **_openai_client_kwargs(
+                    provider,
+                    resolved_api_key=resolved_api_key,
+                    base_url=_normalize_openai_base_url(provider.base_url),
+                ),
             )
+        case "azure_openai_legacy_router":
+            from kosong.contrib.chat_provider.failover import FailoverChatProvider
+            from kosong.contrib.chat_provider.openai_legacy import OpenAILegacy
+
+            endpoints: list[tuple[str, str]] = [
+                (_normalize_openai_base_url(provider.base_url), resolved_api_key),
+            ]
+
+            for fb in provider.fallbacks or []:
+                fb_base_url = _normalize_openai_base_url(fb.base_url)
+                if fb.api_key_env:
+                    fb_key = os.getenv(fb.api_key_env)
+                    if not fb_key:
+                        raise ConfigError(
+                            f"Missing environment variable for fallback api_key: {fb.api_key_env}"
+                        )
+                elif fb.api_key is not None:
+                    fb_key = fb.api_key.get_secret_value()
+                else:
+                    fb_key = resolved_api_key
+
+                endpoints.append((fb_base_url, fb_key))
+
+            providers = [
+                OpenAILegacy(
+                    model=model.model,
+                    base_url=base_url,
+                    api_key=api_key,
+                    reasoning_key=provider.reasoning_key,
+                    **_openai_client_kwargs(
+                        provider,
+                        resolved_api_key=api_key,
+                        base_url=base_url,
+                    ),
+                )
+                for base_url, api_key in endpoints
+            ]
+
+            chat_provider = FailoverChatProvider(providers)
         case "openai_responses":
             from kosong.contrib.chat_provider.openai_responses import OpenAIResponses
 
             chat_provider = OpenAIResponses(
                 model=model.model,
-                base_url=provider.base_url,
+                base_url=_normalize_openai_base_url(provider.base_url),
                 api_key=resolved_api_key,
-                **_openai_client_kwargs(provider, resolved_api_key=resolved_api_key),
+                **_openai_client_kwargs(
+                    provider,
+                    resolved_api_key=resolved_api_key,
+                    base_url=_normalize_openai_base_url(provider.base_url),
+                ),
             )
         case "anthropic":
             from kosong.contrib.chat_provider.anthropic import Anthropic
