@@ -141,6 +141,12 @@ def _is_azure_openai_base_url(base_url: str) -> bool:
     return "/openai/deployments/" in path
 
 
+def _is_azure_openai_v1_base_url(base_url: str) -> bool:
+    """Detect the Azure OpenAI /openai/v1 endpoint which does NOT use api-version."""
+    path = (urlparse(base_url).path or "").lower().rstrip("/")
+    return path.endswith("/openai/v1")
+
+
 def _normalize_openai_base_url(base_url: str) -> str:
     """Normalize base URLs that may include endpoint suffixes or query params."""
     parsed = urlparse(base_url)
@@ -181,18 +187,22 @@ def _openai_client_kwargs(
 
     base_url = base_url or provider.base_url
     if base_url and _is_azure_openai_base_url(base_url):
-        if "api-version" not in default_query:
-            api_version = os.getenv("AZURE_COGNITIVE_SERVICES_API_VERSION") or os.getenv(
-                "AZURE_OPENAI_API_VERSION"
-            )
-            if api_version:
-                default_query["api-version"] = api_version
-            else:
-                raise ConfigError(
-                    "Azure AI Foundry / Cognitive Services deployment base_url detected, but no "
-                    "'api-version' was provided. Set it in provider.default_query['api-version'] "
-                    "or via AZURE_COGNITIVE_SERVICES_API_VERSION / AZURE_OPENAI_API_VERSION."
+        # The /openai/v1 path does not use api-version; only add it for legacy paths.
+        if not _is_azure_openai_v1_base_url(base_url):
+            if "api-version" not in default_query:
+                api_version = os.getenv("AZURE_COGNITIVE_SERVICES_API_VERSION") or os.getenv(
+                    "AZURE_OPENAI_API_VERSION"
                 )
+                if api_version:
+                    default_query["api-version"] = api_version
+                else:
+                    raise ConfigError(
+                        "Azure AI Foundry / Cognitive Services deployment base_url detected, "
+                        "but no 'api-version' was provided. Set it in "
+                        "provider.default_query['api-version'] or via "
+                        "AZURE_COGNITIVE_SERVICES_API_VERSION / AZURE_OPENAI_API_VERSION, "
+                        "or use the /openai/v1 endpoint which does not require api-version."
+                    )
         default_headers.setdefault("api-key", resolved_api_key)
 
     if default_headers:

@@ -38,8 +38,7 @@ def enable_logging(debug: bool = False, *, redirect_stderr: bool = True) -> None
     # installing it until after critical initialization succeeds.
     logger.remove()  # Remove default stderr handler
     logger.enable("kimi_cli")
-    if debug:
-        logger.enable("kosong")
+    logger.enable("kosong")  # Always enable kosong (failover warnings, provider errors)
     logger.add(
         get_share_dir() / "logs" / "kimi.log",
         # FIXME: configure level for different modules

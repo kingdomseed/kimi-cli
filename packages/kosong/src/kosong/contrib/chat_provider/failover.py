@@ -134,26 +134,22 @@ class FailoverChatProvider:
                 provider_label = f"{provider_label} ({provider_url})"
 
             try:
-                logger.debug(
+                logger.info(
                     "Failover: attempt {attempt}/{total} using {provider}",
                     attempt=attempt,
                     total=total,
                     provider=provider_label,
                 )
-                stream = await provider.generate(
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    history=history,
+                result = await self._attempt_provider(
+                    provider, provider_label, system_prompt, tools, history
                 )
-                it = stream.__aiter__()
-                first = await self._wait_for_first_part(it, provider_label)
                 self._active_index = idx
                 logger.info(
                     "Failover: selected {provider} (active_index={idx})",
                     provider=provider_label,
                     idx=idx,
                 )
-                return _PrefetchedStream(stream, first, it)
+                return result
             except BaseException as err:
                 last_err = err
                 if not _should_failover(err):
@@ -192,42 +188,66 @@ class FailoverChatProvider:
             idxs.remove(self._active_index)
         return [self._active_index, *idxs]
 
-    async def _wait_for_first_part(
+    async def _attempt_provider(
         self,
-        it: AsyncIterator[StreamedMessagePart],
+        provider: ChatProvider,
         provider_label: str,
-    ) -> StreamedMessagePart:
+        system_prompt: str,
+        tools: Sequence[Tool],
+        history: Sequence[Message],
+    ) -> _PrefetchedStream:
+        """Try a single provider: generate stream + wait for first token.
+
+        The timeout (if configured) covers the entire attempt — HTTP connection
+        establishment, response headers, AND the first content token.  This ensures
+        failover fires when the endpoint is truly unresponsive, not just when the
+        model is slow to think.
+
+        The warn timer fires periodically to give visibility into slow responses
+        without cancelling the request.
+        """
         warn_s = self._first_token_warn_seconds
         timeout_s = self._first_token_timeout_seconds
 
-        # Fast path: no warning/timeout configured.
-        if warn_s is None and timeout_s is None:
+        async def _connect_and_get_first() -> _PrefetchedStream:
+            stream = await provider.generate(
+                system_prompt=system_prompt,
+                tools=tools,
+                history=history,
+            )
+            it = stream.__aiter__()
             try:
-                return await it.__anext__()
+                first = await it.__anext__()
             except StopAsyncIteration as e:
                 raise APIEmptyResponseError(
                     f"Stream ended before first token from {provider_label}"
                 ) from e
+            return _PrefetchedStream(stream, first, it)
+
+        # Fast path: no warning/timeout configured.
+        if warn_s is None and timeout_s is None:
+            return await _connect_and_get_first()
 
         loop = asyncio.get_running_loop()
         start = loop.time()
         warned = 0
 
-        # Create a single task and wait on it without cancelling it for warnings.
-        # This avoids turning a slow first token into a spurious StopAsyncIteration by
-        # repeatedly cancelling `__anext__()` via `asyncio.wait_for`.
-        first_task = asyncio.create_task(it.__anext__())
+        # Single task covers the entire attempt: HTTP connect → first content token.
+        attempt_task = asyncio.create_task(_connect_and_get_first())
 
         while True:
             elapsed = loop.time() - start
 
             if timeout_s is not None and elapsed >= timeout_s:
-                if not first_task.done():
-                    first_task.cancel()
+                if not attempt_task.done():
+                    attempt_task.cancel()
                     with suppress(BaseException):
-                        await first_task
-                raise TimeoutError()
+                        await attempt_task
+                raise TimeoutError(
+                    f"No response from {provider_label} after {elapsed:.0f}s"
+                )
 
+            # Calculate how long to wait before the next check.
             if warn_s is None:
                 assert timeout_s is not None
                 step_timeout = max(0.0, timeout_s - elapsed)
@@ -236,23 +256,17 @@ class FailoverChatProvider:
                 if timeout_s is not None:
                     step_timeout = min(step_timeout, max(0.0, timeout_s - elapsed))
 
-            try:
-                done, _ = await asyncio.wait({first_task}, timeout=step_timeout)
-                if not done:
-                    raise TimeoutError()
+            done, _ = await asyncio.wait({attempt_task}, timeout=step_timeout)
+            if done:
+                # Task completed (success or exception).  Re-raise any exception.
+                return attempt_task.result()
 
-                try:
-                    return first_task.result()
-                except StopAsyncIteration as e:
-                    raise APIEmptyResponseError(
-                        f"Stream ended before first token from {provider_label}"
-                    ) from e
-            except TimeoutError:
-                warned += 1
-                logger.warning(
-                    "Failover: waiting {elapsed:.1f}s for first token from {provider} "
-                    "(warn #{warned})",
-                    elapsed=loop.time() - start,
-                    provider=provider_label,
-                    warned=warned,
-                )
+            # Not done yet — log a warning and keep waiting.
+            warned += 1
+            logger.warning(
+                "Failover: waiting {elapsed:.0f}s for first token from {provider} "
+                "(warn #{warned})",
+                elapsed=loop.time() - start,
+                provider=provider_label,
+                warned=warned,
+            )
