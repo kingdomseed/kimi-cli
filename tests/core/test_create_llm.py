@@ -122,6 +122,23 @@ def test_augment_provider_with_env_vars_openai_legacy_tracks_applied(monkeypatch
     assert applied == snapshot({"OPENAI_BASE_URL": "https://env.test/v1", "AZURE_OPENAI_API_KEY": "******"})
 
 
+def test_augment_provider_with_env_vars_azure_openai_legacy_router_tracks_applied(monkeypatch):
+    provider = LLMProvider(
+        type="azure_openai_legacy_router",
+        base_url="https://example.cognitiveservices.azure.com/openai/deployments/test-deployment",
+        api_key=SecretStr(""),
+        fallbacks=[],
+    )
+    model = LLMModel(provider="azure-openai", model="test-deployment", max_context_size=4096)
+
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "env-key")
+
+    applied = augment_provider_with_env_vars(provider, model)
+
+    assert provider.api_key.get_secret_value() == "env-key"
+    assert applied == snapshot({"AZURE_OPENAI_API_KEY": "******"})
+
+
 def test_create_llm_openai_legacy_azure_adds_api_key_header_and_api_version(monkeypatch):
     provider = LLMProvider(
         type="openai_legacy",

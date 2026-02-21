@@ -96,6 +96,10 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
             elif api_key := os.getenv("AZURE_OPENAI_API_KEY"):
                 provider.api_key = SecretStr(api_key)
                 applied["AZURE_OPENAI_API_KEY"] = "******"
+        case "azure_openai_legacy_router":
+            if api_key := os.getenv("AZURE_OPENAI_API_KEY"):
+                provider.api_key = SecretStr(api_key)
+                applied["AZURE_OPENAI_API_KEY"] = "******"
         case _:
             pass
 
