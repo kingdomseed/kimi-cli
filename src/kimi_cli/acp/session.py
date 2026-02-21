@@ -18,7 +18,6 @@ from kimi_cli.acp.types import ACPContentBlock
 from kimi_cli.app import KimiCLI
 from kimi_cli.soul import LLMNotSet, LLMNotSupported, MaxStepsReached, RunCancelled
 from kimi_cli.tools import extract_key_argument
-from kimi_cli.utils.errors import format_chat_provider_error, llm_log_path
 from kimi_cli.utils.logging import logger
 from kimi_cli.wire.types import (
     ApprovalRequest,
@@ -189,9 +188,7 @@ class ACPSession:
             raise acp.RequestError.internal_error({"error": str(e)}) from e
         except ChatProviderError as e:
             logger.exception("LLM provider error:")
-            raise acp.RequestError.internal_error(
-                {"error": format_chat_provider_error(e), "log": llm_log_path()}
-            ) from e
+            raise acp.RequestError.internal_error({"error": str(e)}) from e
         except MaxStepsReached as e:
             logger.warning("Max steps reached: {n_steps}", n_steps=e.n_steps)
             return acp.PromptResponse(stop_reason="max_turn_requests")
