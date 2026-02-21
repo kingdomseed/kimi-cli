@@ -65,6 +65,13 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
     """
     applied: dict[str, str] = {}
 
+    if provider.api_key_env:
+        api_key = os.getenv(provider.api_key_env)
+        if not api_key:
+            raise ConfigError(f"Missing environment variable for api_key: {provider.api_key_env}")
+        provider.api_key = SecretStr(api_key)
+        applied[provider.api_key_env] = "******"
+
     match provider.type:
         case "kimi":
             if base_url := os.getenv("KIMI_BASE_URL"):
@@ -91,14 +98,15 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
             if base_url := os.getenv("OPENAI_BASE_URL"):
                 provider.base_url = base_url
                 applied["OPENAI_BASE_URL"] = base_url
-            if api_key := os.getenv("OPENAI_API_KEY"):
-                provider.api_key = SecretStr(api_key)
-                applied["OPENAI_API_KEY"] = "******"
-            elif api_key := os.getenv("AZURE_OPENAI_API_KEY"):
-                provider.api_key = SecretStr(api_key)
-                applied["AZURE_OPENAI_API_KEY"] = "******"
+            if not provider.api_key_env:
+                if api_key := os.getenv("OPENAI_API_KEY"):
+                    provider.api_key = SecretStr(api_key)
+                    applied["OPENAI_API_KEY"] = "******"
+                elif api_key := os.getenv("AZURE_OPENAI_API_KEY"):
+                    provider.api_key = SecretStr(api_key)
+                    applied["AZURE_OPENAI_API_KEY"] = "******"
         case "azure_openai_legacy_router":
-            if api_key := os.getenv("AZURE_OPENAI_API_KEY"):
+            if not provider.api_key_env and (api_key := os.getenv("AZURE_OPENAI_API_KEY")):
                 provider.api_key = SecretStr(api_key)
                 applied["AZURE_OPENAI_API_KEY"] = "******"
         case _:

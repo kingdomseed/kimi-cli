@@ -61,6 +61,8 @@ class LLMProvider(BaseModel):
     """API base URL"""
     api_key: SecretStr
     """API key"""
+    api_key_env: str | None = None
+    """Environment variable name that provides the API key (overrides api_key when set)."""
     env: dict[str, str] | None = None
     """Environment variables to set before creating the provider instance"""
     custom_headers: dict[str, str] | None = None
@@ -87,6 +89,14 @@ class LLMProvider(BaseModel):
     @field_validator("reasoning_key", mode="before")
     @classmethod
     def normalize_reasoning_key(cls, v: str | None) -> str | None:
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
+    @field_validator("api_key_env", mode="before")
+    @classmethod
+    def normalize_api_key_env(cls, v: str | None) -> str | None:
         if isinstance(v, str):
             v = v.strip()
             return v or None
