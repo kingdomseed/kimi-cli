@@ -197,11 +197,21 @@ class FailoverChatProvider:
 
         # Fast path: no warning/timeout configured.
         if warn_s is None and timeout_s is None:
-            return await it.__anext__()
+            try:
+                return await it.__anext__()
+            except StopAsyncIteration as e:
+                raise APIEmptyResponseError(
+                    f"Stream ended before first token from {provider_label}"
+                ) from e
 
         # If we have an overall timeout but no warn interval, use the overall timeout directly.
         if warn_s is None and timeout_s is not None:
-            return await asyncio.wait_for(it.__anext__(), timeout=timeout_s)
+            try:
+                return await asyncio.wait_for(it.__anext__(), timeout=timeout_s)
+            except StopAsyncIteration as e:
+                raise APIEmptyResponseError(
+                    f"Stream ended before first token from {provider_label}"
+                ) from e
 
         assert warn_s is not None
 
@@ -228,3 +238,7 @@ class FailoverChatProvider:
                     provider=provider_label,
                     warned=warned,
                 )
+            except StopAsyncIteration as e:
+                raise APIEmptyResponseError(
+                    f"Stream ended before first token from {provider_label}"
+                ) from e
