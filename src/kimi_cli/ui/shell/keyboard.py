@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 import threading
 import time
@@ -107,9 +108,19 @@ def _listen_for_keyboard_unix(
 
     import termios
 
-    fd = sys.stdin.fileno()
-    oldterm = termios.tcgetattr(fd)
-    rawattr = termios.tcgetattr(fd)
+    # In non-interactive contexts (e.g. piped stdin), stdin may not be a TTY.
+    # Attempting to configure terminal attributes would raise:
+    #   termios.error: (25, 'Inappropriate ioctl for device')
+    if not sys.stdin.isatty():
+        return
+
+    try:
+        fd = sys.stdin.fileno()
+        oldterm = termios.tcgetattr(fd)
+        rawattr = termios.tcgetattr(fd)
+    except (OSError, termios.error):
+        return
+
     rawattr[3] = rawattr[3] & ~termios.ICANON & ~termios.ECHO
     rawattr[6][termios.VMIN] = 0
     rawattr[6][termios.VTIME] = 0
@@ -180,7 +191,8 @@ def _listen_for_keyboard_unix(
             elif c == b"\x05":  # Ctrl+E
                 emit(KeyEvent.CTRL_E)
     finally:
-        termios.tcsetattr(fd, termios.TCSAFLUSH, oldterm)
+        with contextlib.suppress(OSError, termios.error):
+            termios.tcsetattr(fd, termios.TCSAFLUSH, oldterm)
 
 
 def _listen_for_keyboard_windows(
