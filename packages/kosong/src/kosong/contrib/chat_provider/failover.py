@@ -96,6 +96,7 @@ class FailoverChatProvider:
         self,
         providers: Sequence[ChatProvider],
         *,
+        first_token_warn_seconds: float | None = None,
         first_token_timeout_seconds: float | None = None,
     ):
         providers = list(providers)
@@ -103,6 +104,7 @@ class FailoverChatProvider:
             raise ValueError("providers must not be empty")
         self._providers: list[ChatProvider] = providers
         self._active_index: int = 0
+        self._first_token_warn_seconds: float | None = first_token_warn_seconds
         self._first_token_timeout_seconds: float | None = first_token_timeout_seconds
 
     @property
@@ -140,13 +142,7 @@ class FailoverChatProvider:
                 )
                 stream = await provider.generate(system_prompt=system_prompt, tools=tools, history=history)
                 it = stream.__aiter__()
-                if self._first_token_timeout_seconds is None:
-                    first = await it.__anext__()
-                else:
-                    first = await asyncio.wait_for(
-                        it.__anext__(),
-                        timeout=self._first_token_timeout_seconds,
-                    )
+                first = await self._wait_for_first_part(it, provider_label)
                 self._active_index = idx
                 logger.info(
                     "Failover: selected {provider} (active_index={idx})",
@@ -190,3 +186,45 @@ class FailoverChatProvider:
         if self._active_index in idxs:
             idxs.remove(self._active_index)
         return [self._active_index, *idxs]
+
+    async def _wait_for_first_part(
+        self,
+        it: AsyncIterator[StreamedMessagePart],
+        provider_label: str,
+    ) -> StreamedMessagePart:
+        warn_s = self._first_token_warn_seconds
+        timeout_s = self._first_token_timeout_seconds
+
+        # Fast path: no warning/timeout configured.
+        if warn_s is None and timeout_s is None:
+            return await it.__anext__()
+
+        # If we have an overall timeout but no warn interval, use the overall timeout directly.
+        if warn_s is None and timeout_s is not None:
+            return await asyncio.wait_for(it.__anext__(), timeout=timeout_s)
+
+        assert warn_s is not None
+
+        start = asyncio.get_running_loop().time()
+        warned = 0
+
+        while True:
+            elapsed = asyncio.get_running_loop().time() - start
+            remaining: float | None = None
+            if timeout_s is not None:
+                remaining = max(0.0, timeout_s - elapsed)
+                if remaining == 0.0:
+                    raise asyncio.TimeoutError()
+
+            # Wait in warn-sized chunks so we can periodically log "still waiting".
+            step_timeout = warn_s if remaining is None else min(warn_s, remaining)
+            try:
+                return await asyncio.wait_for(it.__anext__(), timeout=step_timeout)
+            except asyncio.TimeoutError:
+                warned += 1
+                logger.warning(
+                    "Failover: waiting {elapsed:.1f}s for first token from {provider} (warn #{warned})",
+                    elapsed=elapsed + step_timeout,
+                    provider=provider_label,
+                    warned=warned,
+                )

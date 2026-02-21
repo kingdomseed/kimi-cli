@@ -289,7 +289,11 @@ def create_llm(
                 for base_url, api_key in endpoints
             ]
 
-            chat_provider = FailoverChatProvider(providers)
+            chat_provider = FailoverChatProvider(
+                providers,
+                first_token_warn_seconds=provider.first_token_warn_seconds,
+                first_token_timeout_seconds=provider.first_token_timeout_seconds,
+            )
         case "openai_responses":
             from kosong.contrib.chat_provider.openai_responses import OpenAIResponses
 

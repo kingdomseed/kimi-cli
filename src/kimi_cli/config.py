@@ -67,6 +67,10 @@ class LLMProvider(BaseModel):
     """Custom headers to include in API requests"""
     default_query: dict[str, object] | None = None
     """Default query parameters to include in API requests"""
+    first_token_warn_seconds: float | None = None
+    """Log a warning if first token takes longer than this many seconds (failover providers only)."""
+    first_token_timeout_seconds: float | None = None
+    """Failover to next provider if first token takes longer than this many seconds (failover providers only)."""
     fallbacks: list[Fallback] | None = None
     """Optional fallback endpoints used by failover-capable providers."""
     reasoning_key: str | None = None
